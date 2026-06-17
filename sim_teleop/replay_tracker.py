@@ -53,13 +53,31 @@ def _resolve_recording(path: Path) -> Path:
     return candidates[-1]
 
 
-def _load_recording(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def _frame_pose(frame: dict, tracker_role: str | None, frame_idx: int) -> list:
+    if tracker_role is None:
+        return frame["tracker_pose"]
+    poses_by_role = frame.get("poses_by_role", {})
+    if tracker_role in poses_by_role:
+        return poses_by_role[tracker_role]
+    for tracker in frame.get("trackers", []):
+        if tracker.get("role") == tracker_role:
+            return tracker["tracker_pose"]
+    raise KeyError(f"Frame {frame_idx} has no tracker role {tracker_role!r}")
+
+
+def _load_recording(
+    path: Path,
+    tracker_role: str | None,
+) -> tuple[np.ndarray, np.ndarray]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     frames = payload.get("episode", [])
     if not frames:
         raise ValueError(f"No frames in {path}")
     timestamps = np.asarray([frame["timestamp"] for frame in frames], dtype=float)
-    poses = np.asarray([frame["tracker_pose"] for frame in frames], dtype=float)
+    poses = np.asarray(
+        [_frame_pose(frame, tracker_role, i) for i, frame in enumerate(frames)],
+        dtype=float,
+    )
     return timestamps, poses
 
 
@@ -563,6 +581,14 @@ def main() -> None:
         help="Replay target site. Defaults to the validated tracker-aligned ee_site.",
     )
     parser.add_argument(
+        "--tracker-role",
+        default=None,
+        help=(
+            "Tracker role to replay from a multi-tracker recording, e.g. "
+            "left_eef or right_eef. Defaults to the legacy top-level tracker_pose."
+        ),
+    )
+    parser.add_argument(
         "--joint6-axis",
         choices=["config", "positive", "negative"],
         default="positive",
@@ -630,12 +656,14 @@ def main() -> None:
         raise ValueError("--smooth-window must be positive.")
 
     recording = _resolve_recording(args.input)
-    timestamps, tracker_poses = _load_recording(recording)
+    timestamps, tracker_poses = _load_recording(recording, args.tracker_role)
     print(
         f"[REPLAY] Loaded {len(timestamps)} frames "
         f"({timestamps[-1] - timestamps[0]:.3f}s) from {recording}",
         flush=True,
     )
+    if args.tracker_role is not None:
+        print(f"[REPLAY] tracker_role={args.tracker_role}", flush=True)
 
     bundle = RobotBundle(
         control_site=args.control_site,

@@ -17,6 +17,7 @@ data/
 
 # Machine-specific calibration
 encoder_calibration.json
+sim_teleop/configs/tracker_mapping.json
 
 # Editor / OS
 .vscode/

@@ -1,8 +1,12 @@
 """OpenVR Vive Tracker reading."""
+import json
+from pathlib import Path
+
 import numpy as np
 import openvr
 
 TRACKER_SERIAL_PREFIX = "3B-A33M"
+DEFAULT_TRACKER_MAPPING_PATH = Path(__file__).with_name("configs") / "tracker_mapping.json"
 
 
 def read_tracker_poses(
@@ -37,3 +41,48 @@ def read_pose(vr_system: openvr.IVRSystem) -> "np.ndarray | None":
     """Return the first valid Vive Tracker pose as a 4x4 matrix, or None."""
     tracker_poses = read_tracker_poses(vr_system)
     return tracker_poses[0][1] if tracker_poses else None
+
+
+def load_tracker_mapping(path: Path | None = DEFAULT_TRACKER_MAPPING_PATH) -> dict[str, str]:
+    """Load role -> tracker serial mapping, ignoring empty roles."""
+    if path is None or not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Tracker mapping must be a JSON object: {path}")
+    return {str(role): str(serial) for role, serial in data.items() if serial}
+
+
+def order_tracker_poses(
+    tracker_poses: list[tuple[str, np.ndarray]],
+    mapping: dict[str, str],
+) -> list[tuple[str, np.ndarray]]:
+    """Return mapped trackers first, then any extra trackers."""
+    by_serial = {serial: pose for serial, pose in tracker_poses}
+    ordered: list[tuple[str, np.ndarray]] = []
+    seen: set[str] = set()
+    for serial in mapping.values():
+        pose = by_serial.get(serial)
+        if pose is not None:
+            ordered.append((serial, pose))
+            seen.add(serial)
+    for serial, pose in tracker_poses:
+        if serial not in seen:
+            ordered.append((serial, pose))
+    return ordered
+
+
+def tracker_pose_records(
+    tracker_poses: list[tuple[str, np.ndarray]],
+    mapping: dict[str, str],
+) -> list[dict]:
+    """Convert tracker poses to JSON-ready records with optional role labels."""
+    role_by_serial = {serial: role for role, serial in mapping.items()}
+    return [
+        {
+            "serial": serial,
+            **({"role": role_by_serial[serial]} if serial in role_by_serial else {}),
+            "tracker_pose": pose.tolist(),
+        }
+        for serial, pose in order_tracker_poses(tracker_poses, mapping)
+    ]

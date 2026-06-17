@@ -7,7 +7,7 @@ Clean YAM teleoperation package extracted from the older HuMI
 
 `sim_teleop` currently supports live teleoperation and YAM episode recording:
 
-1. Read one Vive Tracker from OpenVR.
+1. Read one or more Vive Trackers from OpenVR.
 2. Convert tracker motion into end-effector motion.
 3. Solve YAM arm IK with J-PARSE or mink.
 4. Drive the YAM arm and LINEAR_4310 gripper in a MuJoCo viewer.
@@ -159,20 +159,49 @@ It was copied from the older HTC interface venv and verified with:
 & ".venv\Scripts\python.exe" -m sim_teleop --help
 ```
 
-Important dependencies:
+Key dependencies (versions from the verified `.venv`):
 
 ```text
-openvr
-pyzmq
-mujoco
-numpy
-mink
-pyroki
-jax
-jaxlie
-yourdfpy
-minimalmodbus
-pyserial
+# Teleoperation / hardware
+openvr==2.12.1401            Vive Tracker / OpenVR pose polling
+pyserial==3.5                COM port for the BRT gripper encoder
+minimalmodbus==2.1.1         Modbus for the gripper controller
+python-can==4.5.0            CAN bus support
+
+# Simulation / IK
+mujoco==3.9.0                YAM arm + LINEAR_4310 viewer / replay
+mink==1.1.1                  whole-body IK solver
+pyroki                       (local install) IK solver
+jax==0.10.1, jaxlib==0.10.1  J-PARSE IK backend
+jaxlie==1.5.0                SE(3) / SO(3) Lie algebra
+yourdfpy==0.0.60             URDF kinematic reference
+
+# Network / streaming
+pyzmq==27.1.0                LAN pose streaming (PUB/SUB)
+
+# Math / data
+numpy==2.4.6
+scipy==1.17.1
+pandas==3.0.3
+pyarrow==24.0.0
+
+# Visualization (episode review)
+evo==1.36.5                  trajectory metrics / plotting (TUM)
+rerun-sdk==0.33.0            interactive 3D pose viewer
+matplotlib==3.11.0
+trimesh==4.12.2
+
+# Config / CLI
+tyro==1.0.13                 CLI argument parsing
+pydantic==2.13.4
+rich==14.3.4
+loguru==0.7.3
+```
+
+Dump the full frozen environment anytime with:
+
+```powershell
+& ".venv\Scripts\python.exe" -m pip freeze
 ```
 
 The package also needs source dependencies from the vendored HuMI tree:
@@ -200,13 +229,14 @@ Windows (SteamVR + tracker)                Ubuntu (LAN)
 └────────────────────────────┘           └─────────────────────────┘
 ```
 
-Each frame is JSON, matching `record_tracker` on-disk schema:
+Each frame is JSON, matching `record_tracker` on-disk multi-tracker schema:
 
 ```json
 {
   "timestamp": 1780000000.123,
   "trackers": [
-    {"serial": "3B-A33M...", "tracker_pose": [[...4x4...]]}
+    {"serial": "3B-A33M02233", "role": "left_eef", "tracker_pose": [[...4x4...]]},
+    {"serial": "3B-A33M01660", "role": "right_eef", "tracker_pose": [[...4x4...]]}
   ]
 }
 ```
@@ -318,10 +348,24 @@ Tracker-only episode frame:
 ```json
 {
   "timestamp": 1780000000.123,
-  "serial": "3B-A33M...",
-  "tracker_pose": [[...], [...], [...], [...]]
+  "serial": "3B-A33M02233",
+  "tracker_pose": [[...], [...], [...], [...]],
+  "trackers": [
+    {"serial": "3B-A33M02233", "role": "left_eef", "tracker_pose": [[...]]},
+    {"serial": "3B-A33M01660", "role": "right_eef", "tracker_pose": [[...]]}
+  ],
+  "poses_by_role": {
+    "left_eef": [[...], [...], [...], [...]],
+    "right_eef": [[...], [...], [...], [...]]
+  }
 }
 ```
+
+`serial` and top-level `tracker_pose` are kept for compatibility with the
+single-tracker replay path and prefer `left_eef` when a mapping is configured.
+All poses in one frame are returned by the same OpenVR
+`TrackingUniverseStanding` query, so the tracker matrices share one SteamVR
+standing coordinate system.
 
 Teleop file layout:
 
@@ -389,6 +433,33 @@ realized control site, and magenta for `tracker_site`.
 Note: the vendored YAM URDF currently does not contain a tracker link. The
 current validation path injects a `tracker_site` into the MuJoCo XML and checks
 that the FK-derived `T_EE_TRACK` matches the configured mount transform.
+
+## Episode Visualization (Rerun + evo)
+
+Review recorded tracker episodes in an interactive 3D Rerun viewer (each tracker
+shown as a moving triad plus its smoothed trajectory) and/or export TUM
+trajectories for evo metrics.
+
+```powershell
+& ".venv\Scripts\python.exe" -m sim_teleop.visualize_tracker                          # auto-pick the latest episode under --root
+& ".venv\Scripts\python.exe" -m sim_teleop.visualize_tracker <episode.json>           # specify a file
+& ".venv\Scripts\python.exe" -m sim_teleop.visualize_tracker <f> --axis-length 0.08   # triad axis length in meters
+& ".venv\Scripts\python.exe" -m sim_teleop.visualize_tracker --all-trackers           # show every tracker at once
+& ".venv\Scripts\python.exe" -m sim_teleop.visualize_tracker --tracker-role right_eef # pick one by role
+& ".venv\Scripts\python.exe" -m sim_teleop.visualize_tracker --no-rerun --tum-out data/traj.tum  # TUM export only
+```
+
+Options:
+
+```text
+input                 Episode JSON; omit to auto-pick the latest under --root
+--root ROOT           Search root for auto-picking the latest episode
+--tracker-role ROLE   Tracker role or serial to visualize (left_eef, right_eef, ...)
+--all-trackers        Visualize all trackers in the recording at once
+--axis-length M       Triad axis length in meters
+--tum-out PATH        Write a TUM trajectory file; with multiple trackers use a dir/prefix
+--no-rerun            Only export TUM files; skip the Rerun viewer
+```
 
 ## Pre-collection Checklist
 
