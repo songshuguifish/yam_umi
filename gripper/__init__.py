@@ -10,6 +10,8 @@ from .encoder import (
     create_instrument,
     find_serial_port,
     read_raw,
+    reset_zero,
+    set_midpoint,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "create_instrument",
     "find_serial_port",
     "read_raw",
+    "reset_zero",
+    "set_midpoint",
 ]

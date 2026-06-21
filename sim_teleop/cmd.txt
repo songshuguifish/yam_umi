@@ -11,3 +11,4 @@ python -m sim_teleop.visualize_tracker <f> --axis-length 0.08  # 调坐标架大
 & ".venv\Scripts\python.exe" -m sim_teleop.record_tracker -o data/tracker_poses -g            # 同时录夹爪(自动找编码器)
 & ".venv\Scripts\python.exe" -m sim_teleop.record_tracker -o data/tracker_poses -g --gripper-port COM6
 & ".venv\Scripts\python.exe" -m gripper.calibrate                                            # 单独标定夹爪(交互式)
+& ".venv\Scripts\python.exe" -m gripper.calibrate --zero                                     # 硬件置零(先移到完全闭合位,置零后需重新标定)

@@ -10,4 +10,6 @@ from gripper.encoder import (  # noqa: F401
     create_instrument,
     find_serial_port,
     read_raw,
+    reset_zero,
+    set_midpoint,
 )

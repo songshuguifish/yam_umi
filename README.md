@@ -42,10 +42,17 @@ Plug in the BRT encoder over USB-serial and run from the repo root:
 & ".\.venv\Scripts\python.exe" -m gripper.calibrate            # interactive
 & ".\.venv\Scripts\python.exe" -m gripper.calibrate --show     # just stream raw values
 & ".\.venv\Scripts\python.exe" -m gripper.calibrate --open 703 --closed 883   # set directly
+& ".\.venv\Scripts\python.exe" -m gripper.calibrate --zero     # hardware zero-set (persistent)
 ```
 
 See [gripper/calibrate.py](gripper/calibrate.py) for all options.
 Calibration is saved to `encoder_calibration.json` (git-ignored).
+
+If raw readings jump or wrap (e.g. `11 → 1000` mid-stroke), the encoder's zero
+point is sitting inside the gripper's travel. Move to **fully closed** and run
+`--zero` once to push the zero out of the working range, **then** re-run
+calibration — zeroing is persistent and shifts every raw value, so it
+invalidates the saved `encoder_calibration.json`.
 
 ### Live teleoperation (needs SteamVR + tracker + encoder)
 
@@ -62,6 +69,12 @@ for the full guide.
 
 - Encoder convention: normalised `0 = fully closed`, `1 = fully open`. The map
   is correct regardless of which endpoint has the larger raw value.
+- The BRT encoder also supports a persistent hardware zero-set (register
+  0x0008, exposed as `gripper.calibrate --zero`). It is **not** needed for
+  normal use — the software endpoint calibration removes any dependence on the
+  hardware zero — but it fixes raw readings that jump/wrap across the boundary
+  when the zero lands inside the gripper's travel. Zeroing invalidates the
+  saved calibration, so re-run it afterwards.
 - The `gripper` package is the single source of truth for encoder logic;
   `sim_teleop/gripper.py` is a thin re-export so the teleop pipeline is
   unaffected.

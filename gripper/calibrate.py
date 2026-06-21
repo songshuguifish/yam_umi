@@ -5,6 +5,7 @@ Run from the repository root:
     & ".venv\\Scripts\\python.exe" -m gripper.calibrate
     & ".venv\\Scripts\\python.exe" -m gripper.calibrate --port COM6
     & ".venv\\Scripts\\python.exe" -m gripper.calibrate --open 703 --closed 883   # non-interactive
+    & ".venv\\Scripts\\python.exe" -m gripper.calibrate --zero    # hardware zero-set (persistent)
 
 Workflow (interactive):
     1. Port is auto-detected (override with --port).
@@ -16,6 +17,13 @@ Workflow (interactive):
 Direction note: the normalisation map is correct regardless of whether the
 OPEN value is larger or smaller than the CLOSED value, so physical ordering
 does not matter.
+
+Hardware zero-set (--zero): writes the BRT reset-zero register so the current
+position becomes raw 0, stored persistently in the encoder. Use it when raw
+readings jump/wrap across the boundary (e.g. 11 → 1000) because the zero point
+sits inside the gripper's travel. Move to FULLY CLOSED first, then --zero, then
+re-run calibration — zeroing shifts every raw value and invalidates the saved
+encoder_calibration.json.
 """
 from __future__ import annotations
 
@@ -29,6 +37,8 @@ from .encoder import (
     create_instrument,
     find_serial_port,
     read_raw,
+    reset_zero,
+    set_midpoint,
 )
 
 
@@ -101,6 +111,14 @@ def main() -> None:
                    help="Only stream live raw values (Ctrl-C to quit).")
     p.add_argument("--reset", action="store_true",
                    help="Delete the saved calibration and exit.")
+    p.add_argument("--zero", action="store_true",
+                   help="Hardware zero-set: current position becomes raw 0 "
+                        "(persistent, stored in the encoder). Move to FULLY "
+                        "CLOSED first; invalidates the saved calibration.")
+    p.add_argument("--midpoint", action="store_true",
+                   help="Hardware midpoint-set (persistent, stored in encoder).")
+    p.add_argument("-y", "--yes", action="store_true",
+                   help="Skip the confirmation prompt for --zero/--midpoint.")
     args = p.parse_args()
 
     # ── Reset ──────────────────────────────────────────────────────────────
@@ -126,6 +144,39 @@ def main() -> None:
                 "ERROR: encoder did not respond. Check wiring/baudrate/slave addr."
             )
         print(f"Encoder OK. current raw = {probe}")
+
+        # ── Hardware zero-set / midpoint ──────────────────────────────────
+        if args.zero or args.midpoint:
+            if args.zero:
+                action = "reset zero (current position → raw 0)"
+                print("\nNOTE: for a gripper, move to FULLY CLOSED first so the")
+                print("      whole stroke stays in a non-wrapping region.")
+            else:
+                action = "set midpoint"
+            print(f"\nWARNING: about to {action}.")
+            print("  This is PERSISTENT (stored in the encoder hardware).")
+            print("  The saved encoder_calibration.json will be INVALIDATED;")
+            print("  re-run calibration (O/C or --open/--closed) afterwards.")
+            if not args.yes:
+                if input("Proceed? [y/N] ").strip().lower() != "y":
+                    print("Cancelled.")
+                    return
+            if args.zero:
+                reset_zero(inst)
+                print("Zero reset: current position is now raw 0.")
+            if args.midpoint:
+                set_midpoint(inst)
+                print("Midpoint set.")
+            # The first read right after a write can time out while the encoder
+            # applies the change; retry a few times before reporting.
+            after = None
+            for _ in range(5):
+                after = read_raw(inst)
+                if after is not None:
+                    break
+                time.sleep(0.1)
+            print(f"Read-back: raw = {after}")
+            return
 
         # ── Show-only mode ─────────────────────────────────────────────────
         if args.show:

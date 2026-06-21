@@ -3,6 +3,21 @@
 Reads a BRT Modbus-RTU encoder on a USB-serial port (CH340) and maps the
 raw register value to a normalised [0, 1] gripper position.
 Calibration (open/closed raw values) is persisted to encoder_calibration.json.
+
+BRT register map (manual p.12) — only the ones we touch:
+    0x0000   single-turn value (≤16 bit); the gripper position we read.
+    0x0008   reset zero point — write 1, current position becomes raw 0.
+    0x000E   set midpoint    — write 1, current position becomes the midpoint.
+(Other registers — baudrate 0x0005, mode 0x0006, virtual multi-turn
+0x0000~0x0001, angular velocity 0x0003, single-turn2 0x0025~0x0026 — exist on
+the device but are unused here.)
+
+Hardware zero-set (reset_zero) is persistent and stored in the encoder, not in
+software. Use it when the current zero point falls inside the gripper's travel,
+which makes raw readings jump or wrap across the 0/fulscale boundary (e.g.
+11 → 1000). Zeroing at an endpoint (fully closed) moves the whole stroke into a
+single non-wrapping region. NOTE: zeroing shifts every raw value, so any saved
+encoder_calibration.json is invalidated and must be re-recorded afterwards.
 """
 import json
 from pathlib import Path
@@ -22,6 +37,11 @@ except ImportError:
     _list_ports = None  # type: ignore[assignment]
 
 CALIBRATION_FILE = Path(__file__).parent.parent / "encoder_calibration.json"
+
+# BRT Modbus registers (manual p.12).
+REG_SINGLE_TURN = 0x0000   # single-turn value (≤16 bit) — gripper position
+REG_RESET_ZERO = 0x0008    # write 1 → current position = raw 0 (persistent)
+REG_SET_MIDPOINT = 0x000E  # write 1 → current position = midpoint (persistent)
 
 
 def find_serial_port() -> "str | None":
@@ -63,9 +83,32 @@ def create_instrument(
 def read_raw(inst: "minimalmodbus.Instrument") -> "int | None":
     """Read the single-turn register 0x0000. Returns None on failure."""
     try:
-        return inst.read_register(0x0000, functioncode=3)
+        return inst.read_register(REG_SINGLE_TURN, functioncode=3)
     except Exception:
         return None
+
+
+def reset_zero(inst: "minimalmodbus.Instrument") -> None:
+    """Hardware zero-set: the current position becomes raw 0.
+
+    Persistent — stored in the encoder itself, not in software. Use it when the
+    current zero point sits inside the gripper's travel, which makes raw
+    readings jump/wrap across the 0/fulscale boundary. Zero at an endpoint
+    (fully closed) so the whole stroke stays in a non-wrapping region.
+
+    NOTE: this shifts every raw value, invalidating any saved calibration
+    (raw_open/raw_closed); re-run calibration afterwards.
+    """
+    inst.write_register(REG_RESET_ZERO, 1, functioncode=6)
+
+
+def set_midpoint(inst: "minimalmodbus.Instrument") -> None:
+    """Hardware midpoint-set: the current position becomes the midpoint value.
+
+    Persistent — stored in the encoder. Same invalidates-calibration caveat as
+    :func:`reset_zero`.
+    """
+    inst.write_register(REG_SET_MIDPOINT, 1, functioncode=6)
 
 
 class EncoderCalibration:
