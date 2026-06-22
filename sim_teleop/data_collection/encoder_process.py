@@ -11,8 +11,8 @@ import numpy as np
 from gripper.encoder import (
     EncoderCalibration,
     create_instrument,
-    find_serial_port,
     read_raw,
+    resolve_serial_port,
 )
 
 from .ring_buffer import SharedMemoryRingBuffer
@@ -26,6 +26,7 @@ def encoder_sample_example() -> dict[str, object]:
         "read_end_timestamp": np.float64(0.0),
         "raw": np.int32(-1),
         "normalized": np.float32(np.nan),
+        "metric": np.float32(np.nan),
         "valid": np.int8(0),
     }
 
@@ -39,10 +40,12 @@ class EncoderProcess(mp.Process):
         timebase: Timebase,
         *,
         port: str | None = None,
+        usb_serial: str | None = None,
         baudrate: int = 9600,
         slave_addr: int = 1,
         frequency: float = 30.0,
         calibration: EncoderCalibration | None = None,
+        side: str | None = None,
         verbose: bool = False,
     ) -> None:
         super().__init__()
@@ -51,10 +54,14 @@ class EncoderProcess(mp.Process):
         self.ring_buffer = ring_buffer
         self.timebase = timebase
         self.port = port
+        self.usb_serial = usb_serial
         self.baudrate = baudrate
         self.slave_addr = slave_addr
         self.frequency = float(frequency)
         self.calibration = calibration or EncoderCalibration.load()
+        # Optional side label ("left"/"right") for log lines; samples are routed
+        # to per-side ring buffers/files by the collector, not by this field.
+        self.side = side
         self.verbose = verbose
         self.stop_event = mp.Event()
         self.ready_event = mp.Event()
@@ -67,7 +74,12 @@ class EncoderProcess(mp.Process):
         self.stop_event.set()
 
     def run(self) -> None:
-        port = self.port or find_serial_port()
+        port = resolve_serial_port(
+            port=self.port,
+            usb_serial=self.usb_serial,
+            baudrate=self.baudrate,
+            slave_addr=self.slave_addr,
+        )
         if port is None:
             print("[ENCODER] ERROR: no serial port found.", flush=True)
             return
@@ -85,29 +97,40 @@ class EncoderProcess(mp.Process):
             if probe is None:
                 print("[ENCODER] ERROR: encoder did not respond.", flush=True)
                 return
-            print(f"[ENCODER] Started on {port}, raw={probe}", flush=True)
+            label = f" [{self.side}]" if self.side else ""
+            print(f"[ENCODER]{label} Started on {port}, raw={probe}", flush=True)
             self.ready_event.set()
 
+            consecutive_failures = 0
             while not self.stop_event.is_set():
                 read_start = self.timebase.now()
                 raw = read_raw(inst)
                 read_end = self.timebase.now()
                 if raw is None:
+                    consecutive_failures += 1
+                    if consecutive_failures == 1 or consecutive_failures % 50 == 0:
+                        print(
+                            f"[ENCODER] read failed (#{consecutive_failures}) on {port}",
+                            flush=True,
+                        )
                     sample = {
                         "timestamp": midpoint(read_start, read_end),
                         "read_start_timestamp": read_start,
                         "read_end_timestamp": read_end,
                         "raw": -1,
                         "normalized": np.nan,
+                        "metric": np.nan,
                         "valid": 0,
                     }
                 else:
+                    consecutive_failures = 0
                     sample = {
                         "timestamp": midpoint(read_start, read_end),
                         "read_start_timestamp": read_start,
                         "read_end_timestamp": read_end,
                         "raw": int(raw),
                         "normalized": self.calibration.normalise(int(raw)),
+                        "metric": self.calibration.metric_m(int(raw)),
                         "valid": 1,
                     }
                 self.ring_buffer.put(sample)

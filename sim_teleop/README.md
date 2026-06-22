@@ -461,6 +461,78 @@ input                 Episode JSON; omit to auto-pick the latest under --root
 --no-rerun            Only export TUM files; skip the Rerun viewer
 ```
 
+## Raw Sensor Data Collection (cameras + encoders + trackers)
+
+`sim_teleop.data_collection` records synchronized raw sensor streams —
+RealSense RGB video (PyAV H.264), BRT gripper encoders, and Vive Trackers —
+for later conversion to a LeRobot dataset. Two collectors share the same
+sensor processes:
+
+- **`collect_smoke`** — one fixed-duration episode; a pipeline smoke test.
+- **`collect_session`** — hot-start sensors once, then record many episodes
+  interactively with `r` / `s` / `q` hotkeys. Use this for real collection.
+
+### Running collect_session
+
+Requires `.venv` with `pyrealsense2` + `av` (PyAV) in addition to the
+teleop stack, plus an encoder mapping config (default
+`sim_teleop/configs/encoder_mapping.json`, produced by `calibrate_encoders`):
+
+```powershell
+& ".venv\Scripts\python.exe" -m sim_teleop.data_collection.collect_session -o data/sessions
+```
+
+The collector hot-starts every sensor first, then waits for hotkeys:
+
+```text
+r   start a new episode (cameras START via the recorder's serve mode)
+s   stop and save the current episode
+q   stop, save, and quit
+```
+
+Each episode writes cameras to `episode_NNN/cameras/cam*/color.mp4`
+(H.264, `yuv420p`, CRF 18) with per-frame timestamp `.npy` arrays, and
+slices the encoder/tracker ring buffers by the episode time window into
+`episode_NNN/lowdim/*.npz`.
+
+Options:
+
+```text
+-o, --output-dir DIR            session root (default data/sessions)
+--camera-width/--height/--fps   RealSense stream config (640/480/30)
+--max-cameras N                 cap number of cameras (default 3)
+--max-episode-s FLOAT           ring-buffer capacity guard in seconds (default 180)
+--encoder-mapping PATH          encoder role→port+calibration config
+--no-camera                     run without RealSense (encoders + trackers only)
+--encoder-frequency FLOAT       encoder sampling rate (default 30)
+--tracker-frequency FLOAT       tracker sampling rate (default 120)
+```
+
+### Output layout
+
+```text
+data/sessions/session_YYYYmmdd_HHMMSS/
+  metadata.json                          session-level (schema=hotkey_session_v1, episodes[])
+  cameras_rig_ready.json                 camera serve warmed up
+  realsense_serve.log                    camera subprocess stdout
+  episode_000/
+    metadata.json                        episode-level (t_start/t_stop/duration/counts)
+    cameras/
+      realsense_ready.json / realsense_done.json
+      cam0/color.mp4 + color_timestamps.npy + device_timestamps.npy + ...
+      cam1/...
+    lowdim/
+      encoder_left.npz  encoder_right.npz  tracker.npz
+  episode_001/ ...
+```
+
+### Downstream
+
+Raw `.mp4` + `.npz` episodes feed a LeRobot dataset conversion step
+(videos re-encoded to AV1 on import). Recording uses H.264 specifically
+because PyAV/decord read it reliably and the conversion re-encodes, so
+the recording codec and the final dataset codec are decoupled.
+
 ## Pre-collection Checklist
 
 1. SteamVR detects the tracker.

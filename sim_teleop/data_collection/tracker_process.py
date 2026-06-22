@@ -57,6 +57,7 @@ class TrackerProcess(mp.Process):
         self.verbose = verbose
         self.stop_event = mp.Event()
         self.ready_event = mp.Event()
+        self.error: Exception | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -79,18 +80,34 @@ class TrackerProcess(mp.Process):
             vr_system = openvr.VRSystem()
             time.sleep(1.0)
             print(
-                "[TRACKER] Started "
-                f"left={left_serial} right={right_serial}",
+                "[TRACKER] OpenVR ready, waiting for a valid pose "
+                f"(left={left_serial} right={right_serial})",
                 flush=True,
             )
-            self.ready_event.set()
 
+            consecutive_errors = 0
             while not self.stop_event.is_set():
-                read_start = self.timebase.now()
-                poses = read_tracker_poses(vr_system, self.serial_prefix)
-                read_end = self.timebase.now()
-                by_serial = {serial: pose for serial, pose in poses}
+                try:
+                    read_start = self.timebase.now()
+                    poses = read_tracker_poses(vr_system, self.serial_prefix)
+                    read_end = self.timebase.now()
+                except Exception as exc:  # noqa: BLE001 - transient OpenVR error
+                    consecutive_errors += 1
+                    if consecutive_errors == 1 or consecutive_errors % 100 == 0:
+                        print(
+                            f"[TRACKER] pose read error (#{consecutive_errors}): {exc}",
+                            flush=True,
+                        )
+                    next_tick += dt
+                    sleep_s = next_tick - time.perf_counter()
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+                    else:
+                        next_tick = time.perf_counter()
+                    continue
+                consecutive_errors = 0
 
+                by_serial = {serial: pose for serial, pose in poses}
                 left_pose = by_serial.get(left_serial) if left_serial else None
                 right_pose = by_serial.get(right_serial) if right_serial else None
                 sample = {
@@ -109,6 +126,15 @@ class TrackerProcess(mp.Process):
                 }
                 self.ring_buffer.put(sample)
 
+                if not self.ready_event.is_set() and poses:
+                    print(
+                        f"[TRACKER] tracking {len(poses)} tracker(s) "
+                        f"(L={sample['left_eef_valid']} "
+                        f"R={sample['right_eef_valid']})",
+                        flush=True,
+                    )
+                    self.ready_event.set()
+
                 if self.verbose:
                     print(
                         "[TRACKER] "
@@ -124,8 +150,9 @@ class TrackerProcess(mp.Process):
                     time.sleep(sleep_s)
                 else:
                     next_tick = time.perf_counter()
-        except Exception as exc:  # noqa: BLE001
-            print(f"[TRACKER] ERROR: {exc}", flush=True)
+        except Exception as exc:  # noqa: BLE001 - fatal (init/shutdown) error
+            self.error = exc
+            print(f"[TRACKER] FATAL: {exc}", flush=True)
         finally:
             try:
                 openvr.shutdown()
