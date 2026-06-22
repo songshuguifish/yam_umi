@@ -15,6 +15,7 @@ pyzmq==27.1.0             # LAN pose streaming: stream_pose / receive_pose
 # --- numerics ---
 numpy==2.4.6
 scipy==1.17.1             # quaternion ops in visualize_tracker
+pyarrow==24.0.0           # LeRobot v2.1 parquet export
 
 # --- visualization ---
 rerun-sdk==0.33.0         # interactive 3D replay (python -m sim_teleop.visualize_tracker)
@@ -26,3 +27,4 @@ evo==1.36.5               # TUM trajectory export / evaluation (evo_traj tum ...
 # (pyrealsense2 >= 2.55, opencv-python >= 4.10 both support numpy 2.x).
 pyrealsense2
 opencv-python
+av                        # PyAV: h264 video encoding for realsense_rgb_record.py (tested 17.1.0)
