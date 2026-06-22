@@ -1,0 +1,20 @@
+{
+  "schema": "camera_mounts_v1",
+  "_note": "Rigid mount transforms T_tracker_cam per camera role. Best-guess starting values derived from a CAD point-to-point measure + a verbal 35-deg Y rotation — VERIFY frustum placement in the Rerun 3D view and iterate. translation_m = camera optical center position in the tracker frame; rotation_wxyz = T_tracker_cam orientation (w,x,y,z). parent_tracker_role=null means the camera is standalone (not placed in 3D). Intrinsics live in realsense_cameras.json (camera property, not rig geometry).",
+  "cameras": {
+    "left_cam": {
+      "parent_tracker_role": "left_eef",
+      "translation_m": [0.00059, 0.07217, 0.07816],
+      "rotation_wxyz": [0.95372, 0.0, 0.30071, 0.0]
+    },
+    "right_cam": {
+      "parent_tracker_role": "right_eef",
+      "translation_m": [0.00059, 0.07217, 0.07816],
+      "rotation_wxyz": [0.95372, 0.0, 0.30071, 0.0],
+      "_note": "ASSUMED identical to left_cam mount (same bracket geometry). Verify/correct for the right arm in the viewer."
+    },
+    "egocam": {
+      "parent_tracker_role": null
+    }
+  }
+}

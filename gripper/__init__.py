@@ -8,18 +8,24 @@ from .encoder import (
     CALIBRATION_FILE,
     EncoderCalibration,
     create_instrument,
+    find_port_by_usb_serial,
     find_serial_port,
     read_raw,
     reset_zero,
+    resolve_serial_port,
     set_midpoint,
+    usb_serial_from_port_info,
 )
 
 __all__ = [
     "CALIBRATION_FILE",
     "EncoderCalibration",
     "create_instrument",
+    "find_port_by_usb_serial",
     "find_serial_port",
     "read_raw",
     "reset_zero",
+    "resolve_serial_port",
     "set_midpoint",
+    "usb_serial_from_port_info",
 ]

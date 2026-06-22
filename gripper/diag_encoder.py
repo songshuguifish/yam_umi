@@ -9,13 +9,14 @@ zero-point location but either the encoder mode (0x0006 != 0 → query reads of
 Run from the repo root:
     & ".venv\\Scripts\\python.exe" -m gripper.diag_encoder
     & ".venv\\Scripts\\python.exe" -m gripper.diag_encoder -p COM8
+    & ".venv\\Scripts\\python.exe" -m gripper.diag_encoder --usb-serial 5B90108980
 """
 from __future__ import annotations
 
 import argparse
 import time
 
-from .encoder import create_instrument, find_serial_port
+from .encoder import create_instrument, resolve_serial_port
 
 
 def _rd(inst, reg: int):
@@ -28,15 +29,21 @@ def _rd(inst, reg: int):
 def main() -> None:
     p = argparse.ArgumentParser(description="BRT encoder diagnostic")
     p.add_argument("-p", "--port", default=None, help="Serial port, e.g. COM8.")
+    p.add_argument("--usb-serial", default=None, help="Stable USB serial number.")
     p.add_argument("--baudrate", type=int, default=9600)
     p.add_argument("--slave", type=int, default=1)
     p.add_argument("-n", "--count", type=int, default=20)
     p.add_argument("--dt", type=float, default=0.3)
     args = p.parse_args()
 
-    port = args.port or find_serial_port()
+    port = resolve_serial_port(
+        port=args.port,
+        usb_serial=args.usb_serial,
+        baudrate=args.baudrate,
+        slave_addr=args.slave,
+    )
     if port is None:
-        raise SystemExit("ERROR: no serial port found (pass -p COMx)")
+        raise SystemExit("ERROR: no serial port found (pass -p COMx or --usb-serial SERIAL)")
     print(f"Using port: {port}")
 
     inst = create_instrument(port, slave_addr=args.slave, baudrate=args.baudrate)

@@ -19,6 +19,11 @@ from .tracker_process import TrackerProcess, tracker_sample_example
 
 DEFAULT_REALSENSE_PYTHON = Path(sys.executable)
 
+# The camera recorder does a ~1s warmup after pipeline.start before recording.
+# Launching it first lets that warmup overlap sensor startup, and recording for
+# `duration + CAMERA_WARMUP_S` keeps the camera window covering the main loop.
+CAMERA_WARMUP_S = 3.0
+
 
 def _session_dir(root: Path) -> Path:
     session = root / time.strftime("session_%Y%m%d_%H%M%S")
@@ -41,6 +46,7 @@ def _start_realsense_recorder(
     fps: int,
     max_cameras: int | None,
     timebase: Timebase,
+    ready_file: Path | None = None,
 ) -> subprocess.Popen:
     cmd = [
         str(python_exe),
@@ -63,12 +69,30 @@ def _start_realsense_recorder(
     ]
     if max_cameras is not None:
         cmd.extend(["--max-cameras", str(max_cameras)])
+    if ready_file is not None:
+        cmd.extend(["--ready-file", str(ready_file)])
     return subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
+
+
+def _wait_for_ready_file(
+    ready_file: Path,
+    process: subprocess.Popen,
+    *,
+    timeout_s: float,
+) -> None:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if ready_file.exists():
+            return
+        if process.poll() is not None:
+            raise RuntimeError(f"RealSense recorder exited before ready: {process.returncode}")
+        time.sleep(0.05)
+    raise RuntimeError(f"RealSense recorder did not become ready: {ready_file}")
 
 
 def main() -> None:
@@ -149,6 +173,31 @@ def main() -> None:
 
     try:
         print(f"[COLLECT] Session: {session_dir}", flush=True)
+
+        # Launch cameras first and wait until the recorder has entered its
+        # frame loop before starting lowdim sensors. The extra duration keeps
+        # cameras running through encoder/tracker startup plus the main loop.
+        if args.realsense_python.exists():
+            ready_file = camera_dir / "realsense_ready.json"
+            rs_proc = _start_realsense_recorder(
+                args.realsense_python,
+                camera_dir,
+                duration=args.duration + CAMERA_WARMUP_S,
+                width=args.camera_width,
+                height=args.camera_height,
+                fps=args.camera_fps,
+                max_cameras=args.max_cameras,
+                timebase=timebase,
+                ready_file=ready_file,
+            )
+            _wait_for_ready_file(
+                ready_file,
+                rs_proc,
+                timeout_s=max(args.duration + 15.0, 20.0),
+            )
+        else:
+            print(f"[COLLECT] RealSense python not found: {args.realsense_python}")
+
         for idx, encoder in enumerate(encoders):
             encoder.start()
             if not encoder.ready_event.wait(timeout=5.0):
@@ -160,20 +209,6 @@ def main() -> None:
         tracker.start()
         if not tracker.ready_event.wait(timeout=8.0):
             raise RuntimeError("tracker process did not become ready")
-
-        if args.realsense_python.exists():
-            rs_proc = _start_realsense_recorder(
-                args.realsense_python,
-                camera_dir,
-                duration=args.duration,
-                width=args.camera_width,
-                height=args.camera_height,
-                fps=args.camera_fps,
-                max_cameras=args.max_cameras,
-                timebase=timebase,
-            )
-        else:
-            print(f"[COLLECT] RealSense python not found: {args.realsense_python}")
 
         start = time.time()
         while time.time() - start < args.duration:

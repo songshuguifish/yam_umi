@@ -34,6 +34,80 @@ for the current layout.
 
 ## Quick start
 
+### Convert a raw session to LeRobot v2.1
+
+After recording with the hotkey collector, convert a session directory into the
+same top-level layout as `third_party/mapo_tofu_secondhalf_0527_1`:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -m sim_teleop.data_collection.convert_to_lerobot `
+  data\sessions\session_YYYYMMDD_HHMMSS `
+  -o data\lerobot_yam_umi `
+  --task mapo_tofu `
+  --resize 320x240
+```
+
+The exported state/action vector is 20D:
+`left xyz+rot6d+gripper, right xyz+rot6d+gripper`. By default, the pose frame is
+`link6` and rotation uses the 6D representation formed by concatenating the
+first two rotation-matrix columns. Camera frames are the master timeline;
+tracker poses and encoder values are interpolated onto those frame timestamps. Edit
+`sim_teleop/configs/lerobot_conversion.json` after measuring a better fixed
+tracker mount transform.
+
+Gripper values come from `encoder_left.npz` / `encoder_right.npz`
+`normalized`, where `0 = fully_closed` and `1 = fully_open`. The open/closed
+raw endpoints are saved in `sim_teleop/configs/encoder_mapping.json`:
+
+```json
+"calibration": {
+  "raw_open": 703,
+  "raw_closed": 883,
+  "span": -180,
+  "stroke_mm": 85.0,
+  "convention": "0=fully_closed, 1=fully_open"
+}
+```
+
+Run the calibration by USB serial instead of COM port, because COM numbers can
+change across boots:
+
+```powershell
+scripts\calibrate_encoders.cmd bind --role left_encoder --usb-serial 5B90108980 --calibrate
+scripts\calibrate_encoders.cmd bind --role right_encoder --usb-serial 5B90108259 --calibrate
+```
+
+The pose conversion uses a fixed tracker mount transform. The recorded Vive
+pose is `T_world_tracker`; first the converter computes the absolute link6
+pose:
+
+```text
+T_world_link6 = T_world_tracker @ inv(T_link6_tracker)
+```
+
+For UMI-style data, the exported pose is relative to the first valid frame in
+each episode and each arm:
+
+```text
+T_relative_link6(t) = inv(T_world_link6(0)) @ T_world_link6(t)
+```
+
+This removes the arbitrary SteamVR/OpenVR world origin from the learning state.
+Set `pose_mode` to `absolute` in `sim_teleop/configs/lerobot_conversion.json`
+only if absolute world-frame poses are intentionally needed.
+
+The default `T_link6_tracker` is not estimated from the recording; it comes
+from the hand-defined tracker axis mounting plus the measured mount offset.
+The current config assumes the tracker is 4.394 mm "back" along link6 `-Z`:
+
+```text
+T_link6_tracker =
+[[ 0,  0,  1,  0.0000],
+ [ 1,  0,  0,  0.0000],
+ [ 0,  1,  0, -0.004394],
+ [ 0,  0,  0,  1.0000]]
+```
+
 ### Calibrate the gripper encoder (standalone, COM device only)
 
 Plug in the BRT encoder over USB-serial and run from the repo root:

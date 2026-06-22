@@ -29,14 +29,35 @@ def _import_cv2():
     return cv2
 
 
-def _devices(rs) -> list:
-    devices = []
-    for dev in rs.context().query_devices():
-        name = dev.get_info(rs.camera_info.name)
-        if name.lower() == "platform camera":
-            continue
-        devices.append(dev)
-    return devices
+def _devices(rs, *, attempts: int = 3, backoff_s: float = 2.0) -> list:
+    """Enumerate connected RealSense devices, skipping platform cameras.
+
+    ``query_devices()`` can transiently raise ``RuntimeError`` when a device
+    is mid-recovery / FW-update (e.g. "Failed to create FW update device").
+    Retry with backoff before giving up — the glitch usually clears on the
+    next enumeration (a fresh ``rs.context()`` each attempt).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            devices = []
+            for dev in rs.context().query_devices():
+                name = dev.get_info(rs.camera_info.name)
+                if name.lower() == "platform camera":
+                    continue
+                devices.append(dev)
+            return devices
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            print(
+                f"[RS] device enumeration failed (attempt {attempt}/{attempts}): {exc}",
+                flush=True,
+            )
+            if attempt < attempts:
+                time.sleep(backoff_s)
+    raise RuntimeError(
+        f"RealSense device enumeration failed after {attempts} attempts: {last_exc}"
+    )
 
 
 def _device_info(rs, dev) -> dict[str, str]:

@@ -1,0 +1,66 @@
+{
+  "schema": "yam_umi_lerobot_conversion_v1",
+  "robot_type": "yam_umi_bimanual",
+  "fps": 30,
+  "output_frame": "link6",
+  "pose_mode": "relative_to_first",
+  "state_layout": [
+    "left_x",
+    "left_y",
+    "left_z",
+    "left_rot6d_0",
+    "left_rot6d_1",
+    "left_rot6d_2",
+    "left_rot6d_3",
+    "left_rot6d_4",
+    "left_rot6d_5",
+    "left_gripper",
+    "right_x",
+    "right_y",
+    "right_z",
+    "right_rot6d_0",
+    "right_rot6d_1",
+    "right_rot6d_2",
+    "right_rot6d_3",
+    "right_rot6d_4",
+    "right_rot6d_5",
+    "right_gripper"
+  ],
+  "rotation": "rot6d",
+  "gripper": {
+    "mode": "normalized",
+    "closed": 0.0,
+    "open": 1.0
+  },
+  "video_keys": {
+    "egocam": "observation.images.cam_high",
+    "left_cam": "observation.images.cam_left_wrist",
+    "right_cam": "observation.images.cam_right_wrist"
+  },
+  "arms": {
+    "left": {
+      "tracker_pose_key": "left_eef_pose",
+      "tracker_valid_key": "left_eef_valid",
+      "encoder_file": "encoder_left.npz",
+      "encoder_fallback_files": ["encoder.npz", "encoder0.npz"],
+      "t_output_tracker": [
+        [0.0, 0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, -0.004394],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    },
+    "right": {
+      "tracker_pose_key": "right_eef_pose",
+      "tracker_valid_key": "right_eef_valid",
+      "encoder_file": "encoder_right.npz",
+      "encoder_fallback_files": ["encoder1.npz", "encoder.npz"],
+      "t_output_tracker": [
+        [0.0, 0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, -0.004394],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    }
+  }
+}
