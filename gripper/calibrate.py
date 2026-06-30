@@ -42,7 +42,6 @@ import time
 
 from .encoder import (
     CALIBRATION_FILE,
-    RAW_FULL_SCALE,
     SIDES,
     EncoderCalibration,
     GripperSide,
@@ -112,15 +111,8 @@ def _sample_stable(inst, n: int = 10, dt: float = 0.05) -> int | None:
     return int(statistics.median(vals))
 
 
-def _raw_degrees(raw: int) -> tuple[float, float]:
-    deg = float(raw) * 360.0 / RAW_FULL_SCALE
-    signed_raw = raw if raw <= RAW_FULL_SCALE / 2 else raw - RAW_FULL_SCALE
-    signed_deg = float(signed_raw) * 360.0 / RAW_FULL_SCALE
-    return deg, signed_deg
-
-
 def _monitor(inst, seconds: float | None = None) -> None:
-    """Print raw values and raw-equivalent degrees until interrupted."""
+    """Print raw values until interrupted."""
     t0 = time.time()
     try:
         while seconds is None or time.time() - t0 < seconds:
@@ -128,8 +120,7 @@ def _monitor(inst, seconds: float | None = None) -> None:
             if raw is None:
                 text = "raw=None"
             else:
-                deg, signed_deg = _raw_degrees(int(raw))
-                text = f"raw={raw:4d} deg={deg:8.3f} signed_deg={signed_deg:8.3f}"
+                text = f"raw={int(raw):4d}"
             print(f"\r{text}    ", end="", flush=True)
             time.sleep(0.1)
     except KeyboardInterrupt:
@@ -295,7 +286,7 @@ def main() -> None:
                 time.sleep(0.1)
             print(f"Read-back: raw = {after}")
             if args.show:
-                print("Streaming raw degrees (Ctrl-C to quit)...")
+                print("Streaming raw values (Ctrl-C to quit)...")
                 _monitor(inst)
             return
 

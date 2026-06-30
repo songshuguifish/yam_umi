@@ -21,6 +21,20 @@ from .ring_buffer import SharedMemoryRingBuffer
 from .timebase import Timebase
 from .tracker_process import TrackerProcess, tracker_sample_example
 
+try:
+    from .mochi_status import MochiStatus
+    from .mochi_status import push as mochi_push
+except Exception:
+    class MochiStatus:
+        IDLE = "idle"
+        WORKING = "working"
+        WAITING = "waiting"
+        DONE = "done"
+        ERROR = "error"
+
+    def mochi_push(state: str) -> None:
+        return None
+
 
 DEFAULT_REALSENSE_PYTHON = Path(sys.executable)
 SESSION_METADATA_README = """# Session metadata guide
@@ -247,10 +261,18 @@ def main() -> None:
     parser.add_argument("--max-cameras", type=int, default=3)
     parser.add_argument("--max-episode-s", type=float, default=180.0)
     parser.add_argument("--encoder-mapping", type=Path, default=DEFAULT_ENCODER_CONFIG_PATH)
+    parser.set_defaults(encoder_raw_only=True)
     parser.add_argument(
         "--encoder-raw-only",
+        dest="encoder_raw_only",
         action="store_true",
-        help="Record encoder raw values only; normalized/metric are NaN.",
+        help="Record encoder raw values only; normalized/metric are NaN (default).",
+    )
+    parser.add_argument(
+        "--encoder-normalize",
+        dest="encoder_raw_only",
+        action="store_false",
+        help="Compute encoder normalized/metric values from calibration.",
     )
     parser.add_argument("--realsense-python", type=Path, default=DEFAULT_REALSENSE_PYTHON)
     parser.add_argument("--no-camera", action="store_true")
@@ -259,8 +281,18 @@ def main() -> None:
         action="store_true",
         help="Disable start/stop system prompt sounds.",
     )
+    parser.add_argument(
+        "--no-mochi",
+        action="store_true",
+        help="Disable Clawd Mochi status bridge (recording-state reflection).",
+    )
     args = parser.parse_args()
     cue_sound = not args.no_cue_sound
+    mochi_enabled = not args.no_mochi
+
+    def mochi(state: str) -> None:
+        if mochi_enabled:
+            mochi_push(state)
 
     session_dir = _session_dir(args.output_dir)
     _write_metadata_readme(session_dir / "README_metadata.md", SESSION_METADATA_README)
@@ -373,8 +405,10 @@ def main() -> None:
         if not tracker.ready_event.wait(timeout=8.0):
             raise RuntimeError("tracker process did not become ready")
         print("[SESSION] all sensors hot. c=开始录制, q=退出/结束录制", flush=True)
+        mochi(MochiStatus.IDLE)
 
         while True:
+            mochi(MochiStatus.WAITING)
             cmd = _read_key(
                 f"\n[SESSION] episode {episode_index}: 按 c 开始录制, 按 q 退出",
                 {"c", "q"},
@@ -387,6 +421,7 @@ def main() -> None:
             t_start = timebase.now()
             _play_prompt_sound("start", enabled=cue_sound)
             print("[SESSION] 开始录制", flush=True)
+            mochi(MochiStatus.WORKING)
             enc_count_start = {role: ring.count for role, ring in encoder_rings.items()}
             trk_count_start = tracker_ring.count
 
@@ -465,10 +500,17 @@ def main() -> None:
                 f"cam_frames={cam_frames} -> {ep_dir}",
                 flush=True,
             )
+            mochi(MochiStatus.DONE)
             episode_index += 1
     except KeyboardInterrupt:
         print("\n[SESSION] interrupted.", flush=True)
     finally:
+        _exc = sys.exc_info()[1]
+        mochi(
+            MochiStatus.ERROR
+            if _exc is not None and not isinstance(_exc, KeyboardInterrupt)
+            else MochiStatus.IDLE
+        )
         if camera is not None:
             camera.quit()
         for proc in encoders.values():

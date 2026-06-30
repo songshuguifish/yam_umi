@@ -2,13 +2,10 @@
 # Do not run collect_session over SSH: OpenVR/SteamVR cannot initialize
 # reliably from the sshd service session.
 
-cd C:\Users\pokeumi\Desktop\yam_umi
-#   r = start recording an episode
-#   s = stop/save the active episode
-#   q = quit
-.venv\Scripts\python.exe -m sim_teleop.data_collection.collect_session -o data\sessions --encoder-raw-only
+.venv\Scripts\python.exe -m sim_teleop.data_collection.collect_session -o data\sessions
 
-# Optional: only reset encoder zero at current position, then stream raw degrees.
+# Optional: only reset encoder zero at current position, then stream raw values.
 # Ctrl-C to stop streaming.
+
 .venv\Scripts\python.exe -m gripper.calibrate --usb-serial 5B90108980 --zero --show
 .venv\Scripts\python.exe -m gripper.calibrate --usb-serial 5B90108259 --zero --show

@@ -195,6 +195,27 @@ def _reset_zero_at_open(port: str, *, baudrate: int, slave: int) -> tuple[int, i
         inst.serial.close()
 
 
+def _reset_zero_at_closed(port: str, *, baudrate: int, slave: int) -> tuple[int, int]:
+    print("[ENC-CAL] Move gripper to FULLY CLOSED, then press Enter.")
+    print("[ENC-CAL] The encoder hardware zero will be reset at this position.")
+    input()
+    inst = create_instrument(port, slave_addr=slave, baudrate=baudrate)
+    try:
+        before = _sample_stable(inst)
+        if before is None:
+            raise RuntimeError(f"encoder did not respond on {port}")
+        print(f"[ENC-CAL] closed raw before zero={before}")
+        reset_zero(inst)
+        time.sleep(0.2)
+        after = _sample_stable(inst)
+        if after is None:
+            raise RuntimeError(f"encoder did not respond after zero on {port}")
+        print(f"[ENC-CAL] closed raw after zero={after}")
+        return before, after
+    finally:
+        inst.serial.close()
+
+
 def bind_role(
     *,
     config_path: Path,
@@ -305,6 +326,67 @@ def open_zero_calibrate(
     _save_config(config_path, config)
     print(
         "[ENC-CAL] saved open-zero calibration: "
+        f"role={role} raw_open={raw_open} raw_closed={raw_closed} "
+        f"span={raw_open - raw_closed}"
+    )
+
+
+def closed_zero_calibrate(
+    *,
+    config_path: Path,
+    role: str,
+    port: str,
+    baudrate: int,
+    slave: int,
+    gripper_length: float | None,
+) -> None:
+    """Reset the hardware zero at FULLY CLOSED, then capture FULLY OPEN.
+
+    Mirror of open_zero_calibrate: the zero is set at the closed endpoint so
+    raw_closed=0 and raw_open is positive (span > 0). The normalised output is
+    unchanged (0=fully_closed, 1=fully_open); only the hardware zero reference
+    moves to the closed end.
+    """
+    if role not in DEFAULT_ROLES:
+        raise SystemExit(f"role must be one of: {', '.join(DEFAULT_ROLES)}")
+
+    zero_before, raw_closed = _reset_zero_at_closed(
+        port,
+        baudrate=baudrate,
+        slave=slave,
+    )
+    raw_open = _capture_endpoint(
+        port,
+        baudrate=baudrate,
+        slave=slave,
+        name="open",
+    )
+    if raw_open == raw_closed:
+        raise SystemExit("open and closed raw values are identical")
+
+    calibration = {
+        "raw_open": raw_open,
+        "raw_closed": raw_closed,
+        "span": raw_open - raw_closed,
+        "zero_reference": "fully_closed",
+        "raw_closed_before_zero": zero_before,
+    }
+    config = _load_config(config_path)
+    config["baudrate"] = baudrate
+    config["slave"] = slave
+    config.setdefault("roles", {})
+    config["roles"][role] = _role_entry(
+        port=port,
+        role=role,
+        raw=raw_closed,
+        gripper_length=gripper_length,
+        calibration=calibration,
+    )
+    for missing_role in DEFAULT_ROLES:
+        config["roles"].setdefault(missing_role, None)
+    _save_config(config_path, config)
+    print(
+        "[ENC-CAL] saved closed-zero calibration: "
         f"role={role} raw_open={raw_open} raw_closed={raw_closed} "
         f"span={raw_open - raw_closed}"
     )
@@ -451,6 +533,15 @@ def main() -> None:
     oz_p.add_argument("--usb-serial", default=None)
     oz_p.add_argument("--gripper-length", type=float, default=None)
 
+    cz_p = sub.add_parser(
+        "closed-zero",
+        help="Reset hardware zero at fully closed, then capture fully open.",
+    )
+    cz_p.add_argument("--role", choices=DEFAULT_ROLES, required=True)
+    cz_p.add_argument("--port", default=None)
+    cz_p.add_argument("--usb-serial", default=None)
+    cz_p.add_argument("--gripper-length", type=float, default=None)
+
     resolve_p = sub.add_parser("resolve", help="Resolve saved roles to current COM ports.")
     resolve_p.add_argument("--plain", action="store_true", help="Print ports only.")
 
@@ -493,6 +584,18 @@ def main() -> None:
             raise SystemExit("open-zero requires --port or --usb-serial")
         port = args.port or _port_by_usb_serial(args.usb_serial)
         open_zero_calibrate(
+            config_path=args.config,
+            role=args.role,
+            port=port,
+            baudrate=args.baudrate,
+            slave=args.slave,
+            gripper_length=args.gripper_length,
+        )
+    elif args.cmd == "closed-zero":
+        if args.port is None and args.usb_serial is None:
+            raise SystemExit("closed-zero requires --port or --usb-serial")
+        port = args.port or _port_by_usb_serial(args.usb_serial)
+        closed_zero_calibrate(
             config_path=args.config,
             role=args.role,
             port=port,

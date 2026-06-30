@@ -277,13 +277,18 @@ class EncoderCalibration:
         # current=996). Treat those high values as negative values near open
         # before applying the linear closed->open map.
         if raw_open <= raw_closed:
+            # zero at open: raw_open sits on the 0/FS seam, so a reading just
+            # past open wraps to near FS. Fold the upper region back down.
             wrap_threshold = (raw_closed + RAW_FULL_SCALE) / 2.0
             if raw_value > wrap_threshold:
                 raw_value -= RAW_FULL_SCALE
-        elif raw_closed <= raw_open:
-            wrap_threshold = raw_closed / 2.0
-            if raw_value < wrap_threshold:
-                raw_value += RAW_FULL_SCALE
+        else:
+            # zero at closed: raw_closed sits on the 0/FS seam, so a reading just
+            # past closed wraps to near FS. Fold the upper region back down
+            # (symmetric to the open-zero branch above).
+            wrap_threshold = (raw_open + RAW_FULL_SCALE) / 2.0
+            if raw_value > wrap_threshold:
+                raw_value -= RAW_FULL_SCALE
 
         span = raw_open - raw_closed
         return float(np.clip((raw_value - raw_closed) / span, 0.0, 1.0))

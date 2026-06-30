@@ -45,7 +45,7 @@ class EncoderProcess(mp.Process):
         slave_addr: int = 1,
         frequency: float = 30.0,
         calibration: EncoderCalibration | None = None,
-        raw_only: bool = False,
+        raw_only: bool = True,
         side: str | None = None,
         verbose: bool = False,
     ) -> None:
@@ -183,7 +183,19 @@ def main() -> None:
     parser.add_argument("--frequency", type=float, default=30.0)
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--buffer-size", type=int, default=256)
-    parser.add_argument("--raw-only", action="store_true")
+    parser.set_defaults(raw_only=True)
+    parser.add_argument(
+        "--raw-only",
+        dest="raw_only",
+        action="store_true",
+        help="Record raw values only; normalized/metric are NaN (default).",
+    )
+    parser.add_argument(
+        "--normalize",
+        dest="raw_only",
+        action="store_false",
+        help="Also compute normalized/metric values from calibration.",
+    )
     args = parser.parse_args()
 
     timebase = Timebase.create()
